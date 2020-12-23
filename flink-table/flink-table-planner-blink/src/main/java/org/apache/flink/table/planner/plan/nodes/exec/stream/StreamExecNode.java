@@ -18,23 +18,10 @@
 
 package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
-import org.apache.flink.table.planner.delegation.StreamPlanner;
-import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
-import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase;
-import org.apache.flink.table.types.logical.RowType;
-
-import java.util.List;
 
 /**
  * Base class for stream {@link ExecNode}.
  */
-public abstract class StreamExecNode<T> extends ExecNodeBase<StreamPlanner, T> {
-	public StreamExecNode(
-			List<ExecNode<?>> inputNodes,
-			List<ExecEdge> inputEdges,
-			RowType outputType,
-			String description) {
-		super(inputNodes, inputEdges, outputType, description);
-	}
+public interface StreamExecNode<T> extends ExecNode<T> {
 }

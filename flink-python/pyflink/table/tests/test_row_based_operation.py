@@ -18,9 +18,9 @@
 from pandas.util.testing import assert_frame_equal
 
 from pyflink.common import Row
-from pyflink.table import expressions as expr
+from pyflink.table import expressions as expr, ListView
 from pyflink.table.types import DataTypes
-from pyflink.table.udf import udf, udtf, udaf, AggregateFunction
+from pyflink.table.udf import udf, udtf, udaf, AggregateFunction, TableAggregateFunction, udtaf
 from pyflink.testing import source_sink_utils
 from pyflink.testing.test_case_utils import PyFlinkBlinkBatchTableTestCase, \
     PyFlinkBlinkStreamTableTestCase
@@ -57,18 +57,17 @@ class RowBasedOperationTests(object):
             DataTypes.ROW(
                 [DataTypes.FIELD("a", DataTypes.TINYINT()),
                  DataTypes.FIELD("b",
-                                 DataTypes.ROW([DataTypes.FIELD("a", DataTypes.INT()),
-                                                DataTypes.FIELD("b", DataTypes.INT())]))]))
+                                 DataTypes.ROW([DataTypes.FIELD("c", DataTypes.INT()),
+                                                DataTypes.FIELD("d", DataTypes.INT())]))]))
 
         table_sink = source_sink_utils.TestAppendSink(
             ['a', 'b'],
             [DataTypes.BIGINT(), DataTypes.BIGINT()])
         self.t_env.register_table_sink("Results", table_sink)
 
-        def func(x, y):
+        def func(x):
             import pandas as pd
-            a = (x * 2).rename('b')
-            res = pd.concat([a, x], axis=1) + y
+            res = pd.concat([x.a, x.c + x.d], axis=1)
             return res
 
         pandas_udf = udf(func,
@@ -76,17 +75,16 @@ class RowBasedOperationTests(object):
                              [DataTypes.FIELD("c", DataTypes.BIGINT()),
                               DataTypes.FIELD("d", DataTypes.BIGINT())]),
                          func_type='pandas')
-        t.map(pandas_udf(t.a, t.b)).execute_insert("Results").wait()
+        t.map(pandas_udf).execute_insert("Results").wait()
         actual = source_sink_utils.results()
-        self.assert_equals(actual, ["3,5", "3,7", "6,6", "9,8", "5,8"])
+        self.assert_equals(actual, ["2,4", "1,5", "1,14", "1,9", "2,7"])
 
     def test_flat_map(self):
         t = self.t_env.from_elements(
-            [(1, "2,3", 3), (2, "1", 3), (1, "5,6,7", 4)],
+            [(1, "2,3"), (2, "1"), (1, "5,6,7")],
             DataTypes.ROW(
                 [DataTypes.FIELD("a", DataTypes.TINYINT()),
-                 DataTypes.FIELD("b", DataTypes.STRING()),
-                 DataTypes.FIELD("c", DataTypes.INT())]))
+                 DataTypes.FIELD("b", DataTypes.STRING())]))
 
         table_sink = source_sink_utils.TestAppendSink(
             ['a', 'b'],
@@ -94,13 +92,12 @@ class RowBasedOperationTests(object):
         self.t_env.register_table_sink("Results", table_sink)
 
         @udtf(result_types=[DataTypes.INT(), DataTypes.STRING()])
-        def split(x, string):
-            for s in string.split(","):
-                yield x, s
+        def split(x):
+            for s in x[1].split(","):
+                yield x[0], s
 
-        t.flat_map(split(t.a, t.b)) \
-            .alias("a, b") \
-            .flat_map(split(t.a, t.b)) \
+        t.flat_map(split) \
+            .flat_map(split) \
             .execute_insert("Results") \
             .wait()
         actual = source_sink_utils.results()
@@ -120,17 +117,19 @@ class BatchRowBasedOperationITTests(RowBasedOperationTests, PyFlinkBlinkBatchTab
             ['a', 'b', 'c'],
             [DataTypes.TINYINT(), DataTypes.FLOAT(), DataTypes.INT()])
         self.t_env.register_table_sink("Results", table_sink)
-        pandas_udaf = udaf(lambda a: (a.mean(), a.max()),
+        pandas_udaf = udaf(lambda pd: (pd.b.mean(), pd.a.max()),
                            result_type=DataTypes.ROW(
                                [DataTypes.FIELD("a", DataTypes.FLOAT()),
                                 DataTypes.FIELD("b", DataTypes.INT())]),
                            func_type="pandas")
-        t.group_by(t.a) \
-            .aggregate(pandas_udaf(t.b).alias("c", "d")) \
-            .select("a, c, d").execute_insert("Results") \
+        t.select(t.a, t.b) \
+            .group_by(t.a) \
+            .aggregate(pandas_udaf) \
+            .select("*") \
+            .execute_insert("Results") \
             .wait()
         actual = source_sink_utils.results()
-        self.assert_equals(actual, ["1,5.0,8", "2,2.0,3"])
+        self.assert_equals(actual, ["1,5.0,1", "2,2.0,2"])
 
     def test_aggregate_with_pandas_udaf_without_keys(self):
         t = self.t_env.from_elements(
@@ -144,13 +143,15 @@ class BatchRowBasedOperationITTests(RowBasedOperationTests, PyFlinkBlinkBatchTab
             ['a', 'b'],
             [DataTypes.FLOAT(), DataTypes.INT()])
         self.t_env.register_table_sink("Results", table_sink)
-        pandas_udaf = udaf(lambda a: Row(a.mean(), a.max()),
+        pandas_udaf = udaf(lambda pd: Row(pd.b.mean(), pd.b.max()),
                            result_type=DataTypes.ROW(
                                [DataTypes.FIELD("a", DataTypes.FLOAT()),
                                 DataTypes.FIELD("b", DataTypes.INT())]),
                            func_type="pandas")
-        t.aggregate(pandas_udaf(t.b).alias("c", "d")) \
-            .select("c, d").execute_insert("Results") \
+        t.select(t.b) \
+            .aggregate(pandas_udaf.alias("a", "b")) \
+            .select("a, b") \
+            .execute_insert("Results") \
             .wait()
         actual = source_sink_utils.results()
         self.assert_equals(actual, ["3.8,8"])
@@ -181,7 +182,7 @@ class BatchRowBasedOperationITTests(RowBasedOperationTests, PyFlinkBlinkBatchTab
                 DataTypes.INT()
             ])
         self.t_env.register_table_sink("Results", table_sink)
-        pandas_udaf = udaf(lambda a: (a.mean(), a.max()),
+        pandas_udaf = udaf(lambda pd: (pd.b.mean(), pd.b.max()),
                            result_type=DataTypes.ROW(
                                [DataTypes.FIELD("a", DataTypes.FLOAT()),
                                 DataTypes.FIELD("b", DataTypes.INT())]),
@@ -189,9 +190,10 @@ class BatchRowBasedOperationITTests(RowBasedOperationTests, PyFlinkBlinkBatchTab
         tumble_window = Tumble.over(expr.lit(1).hours) \
             .on(expr.col("rowtime")) \
             .alias("w")
-        t.window(tumble_window) \
+        t.select(t.b, t.rowtime) \
+            .window(tumble_window) \
             .group_by("w") \
-            .aggregate(pandas_udaf(t.b).alias("d", "e")) \
+            .aggregate(pandas_udaf.alias("d", "e")) \
             .select("w.rowtime, d, e") \
             .execute_insert("Results") \
             .wait()
@@ -218,10 +220,57 @@ class StreamRowBasedOperationITTests(RowBasedOperationTests, PyFlinkBlinkStreamT
                    accumulator_type=function.get_accumulator_type(),
                    name=str(function.__class__.__name__))
         result = t.group_by(t.a) \
-            .aggregate(agg(t.b).alias("c", "d")) \
+            .aggregate(agg.alias("c", "d")) \
             .select("a, c, d") \
             .to_pandas()
         assert_frame_equal(result, pd.DataFrame([[1, 3, 15], [2, 2, 4]], columns=['a', 'c', 'd']))
+
+    def test_flat_aggregate(self):
+        import pandas as pd
+        mytop = udtaf(Top2())
+        t = self.t_env.from_elements([(1, 'Hi', 'Hello'),
+                                      (3, 'Hi', 'hi'),
+                                      (5, 'Hi2', 'hi'),
+                                      (7, 'Hi', 'Hello'),
+                                      (2, 'Hi', 'Hello')], ['a', 'b', 'c'])
+        result = t.select(t.a, t.c) \
+            .group_by(t.c) \
+            .flat_aggregate(mytop) \
+            .select(t.a) \
+            .flat_aggregate(mytop.alias("b")) \
+            .select("b") \
+            .to_pandas()
+
+        assert_frame_equal(result, pd.DataFrame([[7], [5]], columns=['b']))
+
+    def test_flat_aggregate_list_view(self):
+        import pandas as pd
+        my_concat = udtaf(ListViewConcatTableAggregateFunction())
+        self.t_env.get_config().get_configuration().set_string(
+            "python.fn-execution.bundle.size", "2")
+        # trigger the cache eviction in a bundle.
+        self.t_env.get_config().get_configuration().set_string(
+            "python.state.cache-size", "2")
+        t = self.t_env.from_elements([(1, 'Hi', 'Hello'),
+                                      (3, 'Hi', 'hi'),
+                                      (3, 'Hi2', 'hi'),
+                                      (3, 'Hi', 'hi'),
+                                      (2, 'Hi', 'Hello'),
+                                      (1, 'Hi2', 'Hello'),
+                                      (3, 'Hi3', 'hi'),
+                                      (3, 'Hi2', 'Hello'),
+                                      (3, 'Hi3', 'hi'),
+                                      (2, 'Hi3', 'Hello')], ['a', 'b', 'c'])
+        result = t.group_by(t.c) \
+            .flat_aggregate(my_concat(t.b, ',').alias("b")) \
+            .select(t.b, t.c) \
+            .alias("a, c")
+        assert_frame_equal(result.to_pandas(),
+                           pd.DataFrame([["Hi,Hi2,Hi,Hi3,Hi3", "hi"],
+                                         ["Hi,Hi2,Hi,Hi3,Hi3", "hi"],
+                                         ["Hi,Hi,Hi2,Hi2,Hi3", "Hello"],
+                                         ["Hi,Hi,Hi2,Hi2,Hi3", "Hello"]],
+                                        columns=['a', 'c']))
 
 
 class CountAndSumAggregateFunction(AggregateFunction):
@@ -236,11 +285,11 @@ class CountAndSumAggregateFunction(AggregateFunction):
 
     def accumulate(self, accumulator, *args):
         accumulator[0] += 1
-        accumulator[1] += args[0]
+        accumulator[1] += args[0][1]
 
     def retract(self, accumulator, *args):
         accumulator[0] -= 1
-        accumulator[1] -= args[0]
+        accumulator[1] -= args[0][1]
 
     def merge(self, accumulator, accumulators):
         for other_acc in accumulators:
@@ -256,6 +305,65 @@ class CountAndSumAggregateFunction(AggregateFunction):
         return DataTypes.ROW(
             [DataTypes.FIELD("a", DataTypes.BIGINT()),
              DataTypes.FIELD("b", DataTypes.BIGINT())])
+
+
+class Top2(TableAggregateFunction):
+
+    def emit_value(self, accumulator):
+        yield Row(accumulator[0])
+        yield Row(accumulator[1])
+
+    def create_accumulator(self):
+        return [None, None]
+
+    def accumulate(self, accumulator, *args):
+        if args[0][0] is not None:
+            if accumulator[0] is None or args[0][0] > accumulator[0]:
+                accumulator[1] = accumulator[0]
+                accumulator[0] = args[0][0]
+            elif accumulator[1] is None or args[0][0] > accumulator[1]:
+                accumulator[1] = args[0][0]
+
+    def retract(self, accumulator, *args):
+        accumulator[0] = accumulator[0] - 1
+
+    def merge(self, accumulator, accumulators):
+        for other_acc in accumulators:
+            self.accumulate(accumulator, other_acc[0])
+            self.accumulate(accumulator, other_acc[1])
+
+    def get_accumulator_type(self):
+        return DataTypes.ARRAY(DataTypes.BIGINT())
+
+    def get_result_type(self):
+        return DataTypes.ROW(
+            [DataTypes.FIELD("a", DataTypes.BIGINT())])
+
+
+class ListViewConcatTableAggregateFunction(TableAggregateFunction):
+
+    def emit_value(self, accumulator):
+        result = accumulator[1].join(accumulator[0])
+        yield Row(result)
+        yield Row(result)
+
+    def create_accumulator(self):
+        return Row(ListView(), '')
+
+    def accumulate(self, accumulator, *args):
+        accumulator[1] = args[1]
+        accumulator[0].add(args[0])
+
+    def retract(self, accumulator, *args):
+        raise NotImplementedError
+
+    def get_accumulator_type(self):
+        return DataTypes.ROW([
+            DataTypes.FIELD("f0", DataTypes.LIST_VIEW(DataTypes.STRING())),
+            DataTypes.FIELD("f1", DataTypes.BIGINT())])
+
+    def get_result_type(self):
+        return DataTypes.ROW([DataTypes.FIELD("a", DataTypes.STRING())])
 
 
 if __name__ == '__main__':

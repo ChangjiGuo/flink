@@ -155,18 +155,18 @@ class FlinkRelMdHandlerTestBase {
     createDataStreamScan(ImmutableList.of("student"), logicalTraits)
   protected lazy val studentFlinkLogicalScan: FlinkLogicalDataStreamTableScan =
     createDataStreamScan(ImmutableList.of("student"), flinkLogicalTraits)
-  protected lazy val studentBatchScan: BatchExecBoundedStreamScan =
+  protected lazy val studentBatchScan: BatchPhysicalBoundedStreamScan =
     createDataStreamScan(ImmutableList.of("student"), batchPhysicalTraits)
-  protected lazy val studentStreamScan: StreamExecDataStreamScan =
+  protected lazy val studentStreamScan: StreamPhysicalDataStreamScan =
     createDataStreamScan(ImmutableList.of("student"), streamPhysicalTraits)
 
   protected lazy val empLogicalScan: LogicalTableScan =
     createDataStreamScan(ImmutableList.of("emp"), logicalTraits)
   protected lazy val empFlinkLogicalScan: FlinkLogicalDataStreamTableScan =
     createDataStreamScan(ImmutableList.of("emp"), flinkLogicalTraits)
-  protected lazy val empBatchScan: BatchExecBoundedStreamScan =
+  protected lazy val empBatchScan: BatchPhysicalBoundedStreamScan =
     createDataStreamScan(ImmutableList.of("emp"), batchPhysicalTraits)
-  protected lazy val empStreamScan: StreamExecDataStreamScan =
+  protected lazy val empStreamScan: StreamPhysicalDataStreamScan =
     createDataStreamScan(ImmutableList.of("emp"), streamPhysicalTraits)
 
   private lazy val valuesType = relBuilder.getTypeFactory
@@ -656,7 +656,7 @@ class FlinkRelMdHandlerTestBase {
   }
 
   def buildFirstRowAndLastRowDeduplicateNode(isRowtime: Boolean): (RelNode, RelNode) = {
-    val scan: StreamExecDataStreamScan =
+    val scan: StreamPhysicalDataStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable3"), streamPhysicalTraits)
     val hash1 = FlinkRelDistribution.hash(Array(1), requireStrict = true)
     val streamExchange1 = new StreamPhysicalExchange(
@@ -679,7 +679,7 @@ class FlinkRelMdHandlerTestBase {
       builder.build(),
       rexBuilder
     )
-    val calcOfFirstRow = new StreamExecCalc(
+    val calcOfFirstRow = new StreamPhysicalCalc(
       cluster,
       streamPhysicalTraits,
       firstRow,
@@ -698,7 +698,7 @@ class FlinkRelMdHandlerTestBase {
       isRowtime,
       keepLastRow = true
     )
-    val calcOfLastRow = new StreamExecCalc(
+    val calcOfLastRow = new StreamPhysicalCalc(
       cluster,
       streamPhysicalTraits,
       lastRow,
@@ -714,7 +714,7 @@ class FlinkRelMdHandlerTestBase {
     val hash1 = FlinkRelDistribution.hash(key, requireStrict = true)
     val streamExchange = new StreamPhysicalExchange(
       cluster, studentStreamScan.getTraitSet.replace(hash1), studentStreamScan, hash1)
-    new StreamExecChangelogNormalize(
+    new StreamPhysicalChangelogNormalize(
       cluster,
       streamPhysicalTraits,
       streamExchange,
@@ -891,9 +891,9 @@ class FlinkRelMdHandlerTestBase {
 
     val hash01 = FlinkRelDistribution.hash(Array(1), requireStrict = true)
 
-    val streamTs: StreamExecDataStreamScan =
+    val streamTs: StreamPhysicalDataStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable1"), streamPhysicalTraits)
-    val streamCalc = new BatchExecCalc(
+    val streamCalc = new StreamPhysicalCalc(
       cluster, streamPhysicalTraits, streamTs, program, program.getOutputRowType)
     val streamExchange = new StreamPhysicalExchange(
       cluster, streamPhysicalTraits.replace(hash01), streamCalc, hash01)
@@ -1236,9 +1236,9 @@ class FlinkRelMdHandlerTestBase {
       tumblingGroupWindow,
       namedPropertiesOfWindowAgg)
 
-    val batchTs: BatchExecBoundedStreamScan =
+    val batchTs: BatchPhysicalBoundedStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable1"), batchPhysicalTraits)
-    val batchCalc = new BatchExecCalc(
+    val batchCalc = new BatchPhysicalCalc(
       cluster, batchPhysicalTraits, batchTs, program, program.getOutputRowType)
     val hash01 = FlinkRelDistribution.hash(Array(0, 1), requireStrict = true)
     val batchExchange1 = new BatchPhysicalExchange(
@@ -1313,9 +1313,9 @@ class FlinkRelMdHandlerTestBase {
       isMerge = false
     )
 
-    val streamTs: StreamExecDataStreamScan =
+    val streamTs: StreamPhysicalDataStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable1"), streamPhysicalTraits)
-    val streamCalc = new BatchExecCalc(
+    val streamCalc = new BatchPhysicalCalc(
       cluster, streamPhysicalTraits, streamTs, program, program.getOutputRowType)
     val streamExchange = new StreamPhysicalExchange(
       cluster, streamPhysicalTraits.replace(hash01), streamCalc, hash01)
@@ -1381,9 +1381,9 @@ class FlinkRelMdHandlerTestBase {
       tumblingGroupWindow,
       namedPropertiesOfWindowAgg)
 
-    val batchTs: BatchExecBoundedStreamScan =
+    val batchTs: BatchPhysicalBoundedStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable1"), batchPhysicalTraits)
-    val batchCalc = new BatchExecCalc(
+    val batchCalc = new BatchPhysicalCalc(
       cluster, batchPhysicalTraits, batchTs, program, program.getOutputRowType)
     val hash1 = FlinkRelDistribution.hash(Array(1), requireStrict = true)
     val batchExchange1 = new BatchPhysicalExchange(
@@ -1458,9 +1458,9 @@ class FlinkRelMdHandlerTestBase {
       isMerge = false
     )
 
-    val streamTs: StreamExecDataStreamScan =
+    val streamTs: StreamPhysicalDataStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable1"), streamPhysicalTraits)
-    val streamCalc = new BatchExecCalc(
+    val streamCalc = new StreamPhysicalCalc(
       cluster, streamPhysicalTraits, streamTs, program, program.getOutputRowType)
     val streamExchange = new StreamPhysicalExchange(
       cluster, streamPhysicalTraits.replace(hash1), streamCalc, hash1)
@@ -1528,9 +1528,9 @@ class FlinkRelMdHandlerTestBase {
       tumblingGroupWindow,
       namedPropertiesOfWindowAgg)
 
-    val batchTs: BatchExecBoundedStreamScan =
+    val batchTs: BatchPhysicalBoundedStreamScan =
       createDataStreamScan(ImmutableList.of("TemporalTable2"), batchPhysicalTraits)
-    val batchCalc = new BatchExecCalc(
+    val batchCalc = new BatchPhysicalCalc(
       cluster, batchPhysicalTraits, batchTs, program, program.getOutputRowType)
     val hash0 = FlinkRelDistribution.hash(Array(0), requireStrict = true)
     val batchExchange1 = new BatchPhysicalExchange(
@@ -1695,7 +1695,7 @@ class FlinkRelMdHandlerTestBase {
       projectProgram
     )
 
-    val calc = new BatchExecCalc(
+    val calc = new BatchPhysicalCalc(
       cluster, batchPhysicalTraits, studentBatchScan, rexProgram, rowTypeOfCalc)
     val hash4 = FlinkRelDistribution.hash(Array(4), requireStrict = true)
     val exchange1 = new BatchPhysicalExchange(cluster, calc.getTraitSet.replace(hash4), calc, hash4)
@@ -1791,7 +1791,7 @@ class FlinkRelMdHandlerTestBase {
       flinkLogicalOverAgg
     )
 
-    val batchWindowAggOutput = new BatchExecCalc(
+    val batchWindowAggOutput = new BatchPhysicalCalc(
       cluster,
       batchPhysicalTraits,
       batchWindowAgg,
@@ -1850,9 +1850,9 @@ class FlinkRelMdHandlerTestBase {
       util.Arrays.asList(overAggGroups.get(1))
     )
 
-    val streamScan: StreamExecDataStreamScan =
+    val streamScan: StreamPhysicalDataStreamScan =
       createDataStreamScan(ImmutableList.of("student"), streamPhysicalTraits)
-    val calc = new StreamExecCalc(
+    val calc = new StreamPhysicalCalc(
       cluster, streamPhysicalTraits, streamScan, rexProgram, rowTypeOfCalc)
     val hash4 = FlinkRelDistribution.hash(Array(4), requireStrict = true)
     val exchange = new StreamPhysicalExchange(cluster, calc.getTraitSet.replace(hash4), calc, hash4)
@@ -1885,7 +1885,7 @@ class FlinkRelMdHandlerTestBase {
       rowTypeOfWindowAggOutput,
       rexBuilder
     )
-    val streamWindowAggOutput = new StreamExecCalc(
+    val streamWindowAggOutput = new StreamPhysicalCalc(
       cluster,
       streamPhysicalTraits,
       windowAgg,
@@ -2422,7 +2422,7 @@ class FlinkRelMdHandlerTestBase {
 
   private def createGlobalAgg(
       table: String, groupBy: String, sum: String): BatchExecHashAggregate = {
-    val scan: BatchExecBoundedStreamScan =
+    val scan: BatchPhysicalBoundedStreamScan =
       createDataStreamScan(ImmutableList.of(table), batchPhysicalTraits)
     relBuilder.push(scan)
     val groupByField = relBuilder.field(groupBy)
@@ -2477,9 +2477,9 @@ class FlinkRelMdHandlerTestBase {
       case FlinkConventions.LOGICAL =>
         new FlinkLogicalDataStreamTableScan(cluster, traitSet, table)
       case FlinkConventions.BATCH_PHYSICAL =>
-        new BatchExecBoundedStreamScan(cluster, traitSet, table, table.getRowType)
+        new BatchPhysicalBoundedStreamScan(cluster, traitSet, table, table.getRowType)
       case FlinkConventions.STREAM_PHYSICAL =>
-        new StreamExecDataStreamScan(cluster, traitSet, table, table.getRowType)
+        new StreamPhysicalDataStreamScan(cluster, traitSet, table, table.getRowType)
       case _ => throw new TableException(s"Unsupported convention trait: $conventionTrait")
     }
     scan.asInstanceOf[T]

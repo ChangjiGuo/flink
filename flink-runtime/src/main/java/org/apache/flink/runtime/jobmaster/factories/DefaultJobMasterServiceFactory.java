@@ -29,6 +29,7 @@ import org.apache.flink.runtime.jobmaster.DefaultExecutionDeploymentTracker;
 import org.apache.flink.runtime.jobmaster.JobManagerSharedServices;
 import org.apache.flink.runtime.jobmaster.JobMaster;
 import org.apache.flink.runtime.jobmaster.JobMasterConfiguration;
+import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.jobmaster.slotpool.SlotPoolFactory;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcService;
@@ -86,12 +87,14 @@ public class DefaultJobMasterServiceFactory implements JobMasterServiceFactory {
 	@Override
 	public JobMaster createJobMasterService(
 			JobGraph jobGraph,
+			JobMasterId jobMasterId,
 			OnCompletionActions jobCompletionActions,
 			ClassLoader userCodeClassloader,
 			long initializationTimestamp) throws Exception {
 
-		return new JobMaster(
+		final JobMaster jobMaster = new JobMaster(
 			rpcService,
+			jobMasterId,
 			jobMasterConfiguration,
 			ResourceID.generate(),
 			jobGraph,
@@ -113,5 +116,9 @@ public class DefaultJobMasterServiceFactory implements JobMasterServiceFactory {
 			new DefaultExecutionDeploymentTracker(),
 			DefaultExecutionDeploymentReconciler::new,
 			initializationTimestamp);
+
+		jobMaster.start();
+
+		return jobMaster;
 	}
 }

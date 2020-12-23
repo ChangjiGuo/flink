@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.planner.plan.rules.physical.stream;
 
-import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecCalc;
-import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecChangelogNormalize;
-import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecWatermarkAssigner;
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalCalc;
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalChangelogNormalize;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalExchange;
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalWatermarkAssigner;
 
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
@@ -34,7 +34,7 @@ import java.util.Collections;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
- * Transpose {@link StreamExecWatermarkAssigner} past into {@link StreamExecChangelogNormalize}.
+ * Transpose {@link StreamPhysicalWatermarkAssigner} past into {@link StreamPhysicalChangelogNormalize}.
  */
 public class WatermarkAssignerChangelogNormalizeTransposeRule
 	extends RelRule<WatermarkAssignerChangelogNormalizeTransposeRule.Config> {
@@ -57,12 +57,12 @@ public class WatermarkAssignerChangelogNormalizeTransposeRule
 
 	@Override
 	public void onMatch(RelOptRuleCall call) {
-		final StreamExecWatermarkAssigner watermark = call.rel(0);
+		final StreamPhysicalWatermarkAssigner watermark = call.rel(0);
 		final RelNode node = call.rel(1);
-		if (node instanceof StreamExecCalc) {
+		if (node instanceof StreamPhysicalCalc) {
 			// with calc
-			final StreamExecCalc calc = call.rel(1);
-			final StreamExecChangelogNormalize changelogNormalize = call.rel(2);
+			final StreamPhysicalCalc calc = call.rel(1);
+			final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(2);
 			final StreamPhysicalExchange exchange = call.rel(3);
 
 			final RelNode newTree = buildTreeInOrder(
@@ -72,9 +72,9 @@ public class WatermarkAssignerChangelogNormalizeTransposeRule
 				calc,
 				exchange.getInput());
 			call.transformTo(newTree);
-		} else if (node instanceof StreamExecChangelogNormalize) {
+		} else if (node instanceof StreamPhysicalChangelogNormalize) {
 			// without calc
-			final StreamExecChangelogNormalize changelogNormalize = call.rel(1);
+			final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
 			final StreamPhysicalExchange exchange = call.rel(2);
 
 			final RelNode newTree = buildTreeInOrder(
@@ -114,17 +114,17 @@ public class WatermarkAssignerChangelogNormalizeTransposeRule
 
 		default Config withCalc() {
 			return withOperandSupplier(b0 ->
-				b0.operand(StreamExecWatermarkAssigner.class).oneInput(
-					b1 -> b1.operand(StreamExecCalc.class).oneInput(
-						b2 -> b2.operand(StreamExecChangelogNormalize.class).oneInput(
+				b0.operand(StreamPhysicalWatermarkAssigner.class).oneInput(
+					b1 -> b1.operand(StreamPhysicalCalc.class).oneInput(
+						b2 -> b2.operand(StreamPhysicalChangelogNormalize.class).oneInput(
 							b3 -> b3.operand(StreamPhysicalExchange.class).anyInputs()))))
 				.as(Config.class);
 		}
 
 		default Config withoutCalc() {
 			return withOperandSupplier(b0 ->
-				b0.operand(StreamExecWatermarkAssigner.class).oneInput(
-					b1 -> b1.operand(StreamExecChangelogNormalize.class).oneInput(
+				b0.operand(StreamPhysicalWatermarkAssigner.class).oneInput(
+					b1 -> b1.operand(StreamPhysicalChangelogNormalize.class).oneInput(
 						b2 -> b2.operand(StreamPhysicalExchange.class).anyInputs())))
 				.as(Config.class);
 		}

@@ -20,8 +20,10 @@ package org.apache.flink.table.planner.plan.nodes.exec;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.table.delegation.Planner;
+import org.apache.flink.table.planner.delegation.PlannerBase;
+import org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecExchange;
 import org.apache.flink.table.planner.plan.nodes.exec.visitor.ExecNodeVisitor;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,26 +34,24 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /**
  * Base class for {@link ExecNode}.
  *
- * @param <P> The {@link Planner} that could translate the node into {@link Transformation}.
  * @param <T> The type of the elements that result from this node.
  */
-public abstract class ExecNodeBase<P extends Planner, T> implements ExecNode<T> {
+public abstract class ExecNodeBase<T> implements ExecNode<T> {
 
 	private final String description;
-	private final List<ExecNode<?>> inputNodes;
 	private final List<ExecEdge> inputEdges;
-	private final RowType outputType;
+	private final LogicalType outputType;
+	// TODO remove this field once edge support `source` and `target`,
+	//  and then we can get/set `inputNodes` through `inputEdges`.
+	private List<ExecNode<?>> inputNodes;
 
 	private transient Transformation<T> transformation;
 
 	protected ExecNodeBase(
-			List<ExecNode<?>> inputNodes,
 			List<ExecEdge> inputEdges,
-			RowType outputType,
+			LogicalType outputType,
 			String description) {
-		checkArgument(checkNotNull(inputNodes).size() == checkNotNull(inputEdges).size());
-		this.inputNodes = new ArrayList<>(inputNodes);
-		this.inputEdges = new ArrayList<>(inputEdges);
+		this.inputEdges = new ArrayList<>(checkNotNull(inputEdges));
 		this.outputType = checkNotNull(outputType);
 		this.description = checkNotNull(description);
 	}
@@ -62,18 +62,26 @@ public abstract class ExecNodeBase<P extends Planner, T> implements ExecNode<T> 
 	}
 
 	@Override
-	public RowType getOutputType() {
+	public LogicalType getOutputType() {
 		return outputType;
 	}
 
 	@Override
 	public List<ExecNode<?>> getInputNodes() {
+		checkNotNull(inputNodes, "inputNodes should not be null, please call setInputNodes first.");
 		return inputNodes;
 	}
 
 	@Override
 	public List<ExecEdge> getInputEdges() {
-		return inputEdges;
+		return checkNotNull(inputEdges, "inputEdges should not be null.");
+	}
+
+	// TODO remove this method once edge support `source` and `target`,
+	//  and then we can get/set `inputNodes` through `inputEdges`.
+	public void setInputNodes(List<ExecNode<?>> inputNodes) {
+		checkArgument(checkNotNull(inputNodes).size() == checkNotNull(inputEdges).size());
+		this.inputNodes = new ArrayList<>(inputNodes);
 	}
 
 	@Override
@@ -88,23 +96,29 @@ public abstract class ExecNodeBase<P extends Planner, T> implements ExecNode<T> 
 		inputEdges.set(ordinalInParent, newInputEdge);
 	}
 
-	@SuppressWarnings("unchecked")
 	public Transformation<T> translateToPlan(Planner planner) {
 		if (transformation == null) {
-			transformation = translateToPlanInternal((P) planner);
+			transformation = translateToPlanInternal((PlannerBase) planner);
 		}
 		return transformation;
 	}
 
 	/**
 	 * Internal method, translates this node into a Flink operator.
-	 *
-	 * @param planner The {@link Planner} that could translate the node into {@link Transformation}.
 	 */
-	protected abstract Transformation<T> translateToPlanInternal(P planner);
+	protected abstract Transformation<T> translateToPlanInternal(PlannerBase planner);
 
 	@Override
 	public void accept(ExecNodeVisitor visitor) {
 		visitor.visit(this);
+	}
+
+	/**
+	 * Whether there is singleton exchange node as input.
+	 */
+	protected boolean inputsContainSingleton() {
+		return getInputNodes().stream().anyMatch(
+				i -> i instanceof CommonExecExchange &&
+						i.getInputEdges().get(0).getRequiredShuffle().getType() == ExecEdge.ShuffleType.SINGLETON);
 	}
 }

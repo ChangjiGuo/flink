@@ -23,18 +23,18 @@ import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.transformations.ShuffleMode;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
-import org.apache.flink.table.planner.plan.nodes.common.CommonPhysicalTableSourceScan;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
+import org.apache.flink.table.planner.plan.nodes.exec.batch.BatchExecBoundedStreamScan;
 import org.apache.flink.table.planner.plan.nodes.exec.batch.BatchExecMultipleInput;
 import org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecExchange;
+import org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecTableSourceScan;
 import org.apache.flink.table.planner.plan.nodes.exec.processor.utils.InputOrderCalculator;
 import org.apache.flink.table.planner.plan.nodes.exec.processor.utils.InputPriorityConflictResolver;
+import org.apache.flink.table.planner.plan.nodes.exec.stream.StreamExecDataStreamScan;
 import org.apache.flink.table.planner.plan.nodes.exec.stream.StreamExecMultipleInput;
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodeUtil;
 import org.apache.flink.table.planner.plan.nodes.exec.visitor.AbstractExecNodeExactlyOnceVisitor;
-import org.apache.flink.table.planner.plan.nodes.physical.batch.BatchExecBoundedStreamScan;
-import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecDataStreamScan;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.calcite.rel.core.Union;
@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * A {@link DAGProcessor} which organize {@link ExecNode}s into multiple input nodes.
@@ -393,11 +394,11 @@ public class MultipleInputNodeCreationProcessor implements DAGProcessor {
 	static boolean isChainableSource(ExecNode<?> node, DAGProcessContext context) {
 		if (node instanceof BatchExecBoundedStreamScan) {
 			BatchExecBoundedStreamScan scan = (BatchExecBoundedStreamScan) node;
-			return scan.boundedStreamTable().dataStream().getTransformation() instanceof SourceTransformation;
+			return scan.getDataStream().getTransformation() instanceof SourceTransformation;
 		} else if (node instanceof StreamExecDataStreamScan) {
 			StreamExecDataStreamScan scan = (StreamExecDataStreamScan) node;
-			return scan.dataStreamTable().dataStream().getTransformation() instanceof SourceTransformation;
-		} else if (node instanceof CommonPhysicalTableSourceScan) {
+			return scan.getDataStream().getTransformation() instanceof SourceTransformation;
+		} else if (node instanceof CommonExecTableSourceScan) {
 			// translateToPlan will cache the transformation,
 			// this is OK because sources do not have any input so the transformation will never change.
 			Transformation<?> transformation = node.translateToPlan(Preconditions.checkNotNull(context).getPlanner());
@@ -478,10 +479,12 @@ public class MultipleInputNodeCreationProcessor implements DAGProcessor {
 		}
 
 		String description = ExecNodeUtil.getMultipleInputDescription(rootNode, inputNodes, new ArrayList<>());
-		return new StreamExecMultipleInput(
-				inputNodes,
+		StreamExecMultipleInput multipleInput = new StreamExecMultipleInput(
+				inputNodes.stream().map(i -> ExecEdge.DEFAULT).collect(Collectors.toList()),
 				rootNode,
 				description);
+		multipleInput.setInputNodes(inputNodes);
+		return multipleInput;
 	}
 
 	private BatchExecMultipleInput createBatchMultipleInputNode(
@@ -514,11 +517,12 @@ public class MultipleInputNodeCreationProcessor implements DAGProcessor {
 		}
 
 		String description = ExecNodeUtil.getMultipleInputDescription(rootNode, inputNodes, inputEdges);
-		return new BatchExecMultipleInput(
-				inputNodes,
+		BatchExecMultipleInput multipleInput = new BatchExecMultipleInput(
 				inputEdges,
 				rootNode,
 				description);
+		multipleInput.setInputNodes(inputNodes);
+		return multipleInput;
 	}
 
 	// --------------------------------------------------------------------------------

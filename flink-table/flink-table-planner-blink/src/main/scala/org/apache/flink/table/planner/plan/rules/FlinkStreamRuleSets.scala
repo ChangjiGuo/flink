@@ -395,15 +395,15 @@ object FlinkStreamRuleSets {
   val PHYSICAL_OPT_RULES: RuleSet = RuleSets.ofList(
     FlinkExpandConversionRule.STREAM_INSTANCE,
     // source
-    StreamExecDataStreamScanRule.INSTANCE,
-    StreamExecTableSourceScanRule.INSTANCE,
-    StreamExecLegacyTableSourceScanRule.INSTANCE,
+    StreamPhysicalDataStreamScanRule.INSTANCE,
+    StreamPhysicalTableSourceScanRule.INSTANCE,
+    StreamPhysicalLegacyTableSourceScanRule.INSTANCE,
     StreamExecIntermediateTableScanRule.INSTANCE,
-    StreamExecWatermarkAssignerRule.INSTANCE,
+    StreamPhysicalWatermarkAssignerRule.INSTANCE,
     StreamExecValuesRule.INSTANCE,
     // calc
-    StreamExecCalcRule.INSTANCE,
-    StreamExecPythonCalcRule.INSTANCE,
+    StreamPhysicalCalcRule.INSTANCE,
+    StreamPhysicalPythonCalcRule.INSTANCE,
     // union
     StreamExecUnionRule.INSTANCE,
     // sort
@@ -437,9 +437,9 @@ object FlinkStreamRuleSets {
     // CEP
     StreamExecMatchRule.INSTANCE,
     // correlate
-    StreamExecConstantTableFunctionScanRule.INSTANCE,
-    StreamExecCorrelateRule.INSTANCE,
-    StreamExecPythonCorrelateRule.INSTANCE,
+    StreamPhysicalConstantTableFunctionScanRule.INSTANCE,
+    StreamPhysicalCorrelateRule.INSTANCE,
+    StreamPhysicalPythonCorrelateRule.INSTANCE,
     // sink
     StreamExecSinkRule.INSTANCE,
     StreamExecLegacySinkRule.INSTANCE
