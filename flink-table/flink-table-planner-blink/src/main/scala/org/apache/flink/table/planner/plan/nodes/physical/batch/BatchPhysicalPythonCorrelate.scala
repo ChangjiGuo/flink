@@ -18,16 +18,16 @@
 package org.apache.flink.table.planner.plan.nodes.physical.batch
 
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
-import org.apache.flink.table.planner.plan.nodes.common.CommonPythonCorrelate
 import org.apache.flink.table.planner.plan.nodes.exec.batch.BatchExecPythonCorrelate
-import org.apache.flink.table.planner.plan.nodes.exec.{ExecEdge, ExecNode}
+import org.apache.flink.table.planner.plan.nodes.exec.{InputProperty, ExecNode}
 import org.apache.flink.table.planner.plan.nodes.logical.FlinkLogicalTableFunctionScan
+import org.apache.flink.table.planner.plan.utils.JoinTypeUtil
 
 import org.apache.calcite.plan.{RelOptCluster, RelTraitSet}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.`type`.RelDataType
 import org.apache.calcite.rel.core.{Correlate, JoinRelType}
-import org.apache.calcite.rex.{RexCall, RexNode, RexProgram}
+import org.apache.calcite.rex.{RexCall, RexNode}
 
 /**
   * Batch physical RelNode for [[Correlate]] (Python user defined table function).
@@ -38,7 +38,6 @@ class BatchPhysicalPythonCorrelate(
     inputRel: RelNode,
     scan: FlinkLogicalTableFunctionScan,
     condition: Option[RexNode],
-    projectProgram: Option[RexProgram],
     outputRowType: RelDataType,
     joinType: JoinRelType)
   extends BatchPhysicalCorrelateBase(
@@ -47,15 +46,12 @@ class BatchPhysicalPythonCorrelate(
     inputRel,
     scan,
     condition,
-    projectProgram,
     outputRowType,
-    joinType)
-  with CommonPythonCorrelate {
+    joinType) {
 
   def copy(
       traitSet: RelTraitSet,
       child: RelNode,
-      projectProgram: Option[RexProgram],
       outputType: RelDataType): RelNode = {
     new BatchPhysicalPythonCorrelate(
       cluster,
@@ -63,17 +59,16 @@ class BatchPhysicalPythonCorrelate(
       child,
       scan,
       condition,
-      projectProgram,
       outputType,
       joinType)
   }
 
   override def translateToExecNode(): ExecNode[_] = {
     new BatchExecPythonCorrelate(
-      joinType,
+      JoinTypeUtil.getFlinkJoinType(joinType),
       scan.getCall.asInstanceOf[RexCall],
-      condition,
-      ExecEdge.DEFAULT,
+      condition.orNull,
+      InputProperty.DEFAULT,
       FlinkTypeFactory.toLogicalRowType(getRowType),
       getRelDetailedDescription
     )

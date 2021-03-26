@@ -19,7 +19,7 @@ package org.apache.flink.table.planner.plan.nodes.physical.stream
 
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.exec.stream.StreamExecCorrelate
-import org.apache.flink.table.planner.plan.nodes.exec.{ExecEdge, ExecNode}
+import org.apache.flink.table.planner.plan.nodes.exec.{InputProperty, ExecNode}
 import org.apache.flink.table.planner.plan.nodes.logical.FlinkLogicalTableFunctionScan
 import org.apache.flink.table.planner.plan.utils.JoinTypeUtil
 
@@ -27,7 +27,7 @@ import org.apache.calcite.plan.{RelOptCluster, RelTraitSet}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.`type`.RelDataType
 import org.apache.calcite.rel.core.JoinRelType
-import org.apache.calcite.rex.{RexCall, RexNode, RexProgram}
+import org.apache.calcite.rex.{RexCall, RexNode}
 
 /**
  * Flink RelNode which matches along with join a Java/Scala user defined table function.
@@ -36,7 +36,6 @@ class StreamPhysicalCorrelate(
     cluster: RelOptCluster,
     traitSet: RelTraitSet,
     inputRel: RelNode,
-    projectProgram: Option[RexProgram],
     scan: FlinkLogicalTableFunctionScan,
     condition: Option[RexNode],
     outputRowType: RelDataType,
@@ -45,7 +44,6 @@ class StreamPhysicalCorrelate(
     cluster,
     traitSet,
     inputRel,
-    projectProgram,
     scan,
     condition,
     outputRowType,
@@ -54,13 +52,11 @@ class StreamPhysicalCorrelate(
   def copy(
       traitSet: RelTraitSet,
       newChild: RelNode,
-      projectProgram: Option[RexProgram],
       outputType: RelDataType): RelNode = {
     new StreamPhysicalCorrelate(
       cluster,
       traitSet,
       newChild,
-      projectProgram,
       scan,
       condition,
       outputType,
@@ -70,10 +66,9 @@ class StreamPhysicalCorrelate(
   override def translateToExecNode(): ExecNode[_] = {
     new StreamExecCorrelate(
       JoinTypeUtil.getFlinkJoinType(joinType),
-      projectProgram.orNull,
       scan.getCall.asInstanceOf[RexCall],
       condition.orNull,
-      ExecEdge.DEFAULT,
+      InputProperty.DEFAULT,
       FlinkTypeFactory.toLogicalRowType(getRowType),
       getRelDetailedDescription)
   }

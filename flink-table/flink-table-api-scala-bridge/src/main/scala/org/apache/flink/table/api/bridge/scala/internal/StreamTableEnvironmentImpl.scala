@@ -219,7 +219,7 @@ class StreamTableEnvironmentImpl (
     new ScalaDataStreamQueryOperation[T](
       dataStream.javaStream,
       typeInfoSchema.getIndices,
-      typeInfoSchema.toTableSchema)
+      typeInfoSchema.toResolvedSchema)
   }
 
   override protected def qualifyQueryOperation(
@@ -230,7 +230,7 @@ class StreamTableEnvironmentImpl (
         identifier,
         qo.getDataStream,
         qo.getFieldIndices,
-        qo.getTableSchema
+        qo.getResolvedSchema
       )
     case _ =>
       queryOperation
@@ -257,6 +257,8 @@ object StreamTableEnvironmentImpl {
       settings: EnvironmentSettings,
       tableConfig: TableConfig)
     : StreamTableEnvironmentImpl = {
+
+    tableConfig.addConfiguration(settings.toConfiguration)
 
     if (!settings.isStreamingMode) {
       throw new TableException(

@@ -21,10 +21,10 @@ from typing import Dict, List, Union
 
 from pyflink.common import typeinfo
 from pyflink.common.serialization import DeserializationSchema, Encoder, SerializationSchema
-from pyflink.common.typeinfo import RowTypeInfo, WrapperTypeInfo, TypeInformation
+from pyflink.common.typeinfo import RowTypeInfo, TypeInformation
 from pyflink.datastream.functions import SourceFunction, SinkFunction
 from pyflink.java_gateway import get_gateway
-from pyflink.util.utils import load_java_class, to_jarray
+from pyflink.util.java_utils import load_java_class, to_jarray
 
 from py4j.java_gateway import java_import
 
@@ -354,11 +354,8 @@ class JdbcSink(SinkFunction):
         gateway = get_gateway()
         JJdbcTypeUtil = gateway.jvm.org.apache.flink.connector.jdbc.utils.JdbcTypeUtil
         for field_type in type_info.get_field_types():
-            if isinstance(field_type, WrapperTypeInfo):
-                sql_types.append(JJdbcTypeUtil
-                                 .typeInformationToSqlType(field_type.get_java_type_info()))
-            else:
-                raise ValueError('field_type must be WrapperTypeInfo')
+            sql_types.append(JJdbcTypeUtil
+                             .typeInformationToSqlType(field_type.get_java_type_info()))
         j_sql_type = to_jarray(gateway.jvm.int, sql_types)
         output_format_clz = gateway.jvm.Class\
             .forName('org.apache.flink.connector.jdbc.internal.JdbcBatchingOutputFormat', False,

@@ -33,56 +33,81 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase;
+import org.apache.flink.table.planner.plan.nodes.exec.MultipleTransformationTranslator;
+import org.apache.flink.table.planner.plan.nodes.exec.spec.DynamicTableSourceSpec;
 import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Collections;
 
 /**
  * Base {@link ExecNode} to read data from an external source defined by a {@link ScanTableSource}.
  */
-public abstract class CommonExecTableSourceScan extends ExecNodeBase<RowData> {
-	private final ScanTableSource tableSource;
+public abstract class CommonExecTableSourceScan extends ExecNodeBase<RowData>
+        implements MultipleTransformationTranslator<RowData> {
+    public static final String FIELD_NAME_SCAN_TABLE_SOURCE = "scanTableSource";
 
-	protected CommonExecTableSourceScan(ScanTableSource tableSource, LogicalType outputType, String description) {
-		super(Collections.emptyList(), outputType, description);
-		this.tableSource = tableSource;
-	}
+    @JsonProperty(FIELD_NAME_SCAN_TABLE_SOURCE)
+    private final DynamicTableSourceSpec tableSourceSpec;
 
-	@Override
-	protected Transformation<RowData> translateToPlanInternal(PlannerBase planner) {
-		final StreamExecutionEnvironment env = planner.getExecEnv();
-		final String operatorName = getDesc();
-		InternalTypeInfo<RowData> outputTypeInfo = InternalTypeInfo.of((RowType) getOutputType());
-		ScanTableSource.ScanRuntimeProvider provider =
-				tableSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
-		if (provider instanceof SourceFunctionProvider) {
-			SourceFunction<RowData> sourceFunction = ((SourceFunctionProvider) provider).createSourceFunction();
-			return env.addSource(sourceFunction, operatorName, outputTypeInfo).getTransformation();
-		} else if (provider instanceof InputFormatProvider) {
-			InputFormat<RowData, ?> inputFormat = ((InputFormatProvider) provider).createInputFormat();
-			return createInputFormatTransformation(env, inputFormat, outputTypeInfo, operatorName);
-		} else if (provider instanceof SourceProvider) {
-			Source<RowData, ?, ?> source = ((SourceProvider) provider).createSource();
-			// TODO: Push down watermark strategy to source scan
-			return env.fromSource(source, WatermarkStrategy.noWatermarks(), operatorName).getTransformation();
-		} else if (provider instanceof DataStreamScanProvider) {
-			return ((DataStreamScanProvider) provider).produceDataStream(env).getTransformation();
-		} else {
-			throw new UnsupportedOperationException(provider.getClass().getSimpleName() + " is unsupported now.");
-		}
-	}
+    protected CommonExecTableSourceScan(
+            DynamicTableSourceSpec tableSourceSpec,
+            int id,
+            LogicalType outputType,
+            String description) {
+        super(id, Collections.emptyList(), outputType, description);
+        this.tableSourceSpec = tableSourceSpec;
+    }
 
-	/**
-	 * Creates a {@link Transformation} based on the given {@link InputFormat}.
-	 * The implementation is different for streaming mode and batch mode.
-	 */
-	protected abstract Transformation<RowData> createInputFormatTransformation(
-			StreamExecutionEnvironment env,
-			InputFormat<RowData, ?> inputFormat,
-			InternalTypeInfo<RowData> outputTypeInfo,
-			String name);
+    public DynamicTableSourceSpec getTableSourceSpec() {
+        return tableSourceSpec;
+    }
 
+    @Override
+    protected Transformation<RowData> translateToPlanInternal(PlannerBase planner) {
+        final StreamExecutionEnvironment env = planner.getExecEnv();
+        final String operatorName = getDescription();
+        final InternalTypeInfo<RowData> outputTypeInfo =
+                InternalTypeInfo.of((RowType) getOutputType());
+        final ScanTableSource tableSource = tableSourceSpec.getScanTableSource(planner);
+        ScanTableSource.ScanRuntimeProvider provider =
+                tableSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        if (provider instanceof SourceFunctionProvider) {
+            SourceFunction<RowData> sourceFunction =
+                    ((SourceFunctionProvider) provider).createSourceFunction();
+            return env.addSource(sourceFunction, operatorName, outputTypeInfo).getTransformation();
+        } else if (provider instanceof InputFormatProvider) {
+            InputFormat<RowData, ?> inputFormat =
+                    ((InputFormatProvider) provider).createInputFormat();
+            return createInputFormatTransformation(env, inputFormat, outputTypeInfo, operatorName);
+        } else if (provider instanceof SourceProvider) {
+            Source<RowData, ?, ?> source = ((SourceProvider) provider).createSource();
+            // TODO: Push down watermark strategy to source scan
+            return env.fromSource(
+                            source, WatermarkStrategy.noWatermarks(), operatorName, outputTypeInfo)
+                    .getTransformation();
+        } else if (provider instanceof DataStreamScanProvider) {
+            Transformation<RowData> transformation =
+                    ((DataStreamScanProvider) provider).produceDataStream(env).getTransformation();
+            transformation.setOutputType(outputTypeInfo);
+            return transformation;
+        } else {
+            throw new UnsupportedOperationException(
+                    provider.getClass().getSimpleName() + " is unsupported now.");
+        }
+    }
+
+    /**
+     * Creates a {@link Transformation} based on the given {@link InputFormat}. The implementation
+     * is different for streaming mode and batch mode.
+     */
+    protected abstract Transformation<RowData> createInputFormatTransformation(
+            StreamExecutionEnvironment env,
+            InputFormat<RowData, ?> inputFormat,
+            InternalTypeInfo<RowData> outputTypeInfo,
+            String name);
 }

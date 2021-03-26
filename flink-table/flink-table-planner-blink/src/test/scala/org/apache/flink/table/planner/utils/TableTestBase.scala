@@ -63,16 +63,20 @@ import org.apache.flink.table.types.utils.TypeConversions
 import org.apache.flink.table.typeutils.FieldInfoUtils
 import org.apache.flink.types.Row
 
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
+
 import org.apache.calcite.avatica.util.TimeUnit
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.sql.parser.SqlParserPos
 import org.apache.calcite.sql.{SqlExplainLevel, SqlIntervalQualifier}
-import org.junit.Assert.{assertEquals, assertTrue}
+import org.junit.Assert.{assertEquals, assertTrue, fail}
 import org.junit.Rule
 import org.junit.rules.{ExpectedException, TemporaryFolder, TestName}
 
 import _root_.java.math.{BigDecimal => JBigDecimal}
 import _root_.java.util
+import java.io.{File, IOException}
+import java.nio.file.{Files, Paths}
 import java.time.Duration
 
 import _root_.scala.collection.JavaConversions._
@@ -209,7 +213,8 @@ abstract class TableTestUtilBase(test: TableTestBase, isStreamingMode: Boolean) 
       val names = FieldInfoUtils.getFieldNames(typeInfo)
       TableSchema.builder().fields(names, types).build()
     } else {
-      FieldInfoUtils.getFieldsInfo(typeInfo, fields.toArray).toTableSchema
+      TableSchema.fromResolvedSchema(
+        FieldInfoUtils.getFieldsInfo(typeInfo, fields.toArray).toResolvedSchema)
     }
 
     addTableSource(name, new TestTableSource(isBounded, tableSchema))
@@ -730,6 +735,33 @@ abstract class TableTestUtilBase(test: TableTestBase, isStreamingMode: Boolean) 
   }
 
   /**
+   * Verify the json plan for the given insert statement.
+   */
+  def verifyJsonPlan(insert: String): Unit = {
+    val jsonPlan = getTableEnv.asInstanceOf[TableEnvironmentInternal].getJsonPlan(insert)
+    val jsonPlanWithoutFlinkVersion = TableTestUtil.replaceFlinkVersion(jsonPlan)
+    // add the postfix to the path to avoid conflicts
+    // between the test class name and the result file name
+    val path = test.getClass.getName.replaceAll("\\.", "/") + "_jsonplan"
+    val fileName = test.testName.getMethodName + ".out"
+    val file = new File(s"./src/test/resources/$path/$fileName")
+    if (file.exists()) {
+      val expected = TableTestUtil.readFromResource(s"$path/$fileName")
+      assertEquals(
+        TableTestUtil.replaceExecNodeId(
+          TableTestUtil.getFormattedJson(expected)),
+        TableTestUtil.replaceExecNodeId(
+          TableTestUtil.getFormattedJson(jsonPlanWithoutFlinkVersion)))
+    } else {
+      file.getParentFile.mkdirs()
+      assertTrue(file.createNewFile())
+      val prettyJson = TableTestUtil.getPrettyJson(jsonPlanWithoutFlinkVersion)
+      Files.write(Paths.get(file.toURI), prettyJson.getBytes)
+      fail(s"$fileName does not exist.")
+    }
+  }
+
+  /**
    * Verify the given query and the expected plans translated from the SELECT query.
    *
    * @param query the SELECT query to check
@@ -860,8 +892,8 @@ abstract class TableTestUtilBase(test: TableTestBase, isStreamingMode: Boolean) 
 
     // build optimized exec plan if `expectedPlans` contains OPT_EXEC
     val optimizedExecPlan = if (expectedPlans.contains(PlanKind.OPT_EXEC)) {
-      val optimizedExecs = getPlanner.translateToExecNodePlan(optimizedRels)
-      System.lineSeparator + ExecNodePlanDumper.dagToString(optimizedExecs)
+      val execGraph = getPlanner.translateToExecNodeGraph(optimizedRels)
+      System.lineSeparator + ExecNodePlanDumper.dagToString(execGraph)
     } else {
       ""
     }
@@ -1480,6 +1512,8 @@ object TestingTableEnvironment {
       catalogManager: Option[CatalogManager] = None,
       tableConfig: TableConfig): TestingTableEnvironment = {
 
+    tableConfig.addConfiguration(settings.toConfiguration)
+
     // temporary solution until FLINK-15635 is fixed
     val classLoader = Thread.currentThread.getContextClassLoader
 
@@ -1580,7 +1614,7 @@ object TableTestUtil {
       ObjectIdentifier.of(tEnv.getCurrentCatalog, tEnv.getCurrentDatabase, name),
       dataStream,
       typeInfoSchema.getIndices,
-      typeInfoSchema.toTableSchema,
+      typeInfoSchema.toResolvedSchema,
       fieldNullables.getOrElse(Array.fill(fieldCnt)(true)),
       statistic.getOrElse(FlinkStatistic.UNKNOWN)
     )
@@ -1601,8 +1635,34 @@ object TableTestUtil {
   }
 
   def readFromResource(path: String): String = {
-    val inputStream = getClass.getResource(path).getFile
-    Source.fromFile(inputStream).mkString
+    val basePath = getClass.getResource("/").getFile
+    val fullPath = if (path.startsWith("/")) {
+      s"$basePath${path.substring(1)}"
+    } else {
+      s"$basePath$path"
+    }
+    val source = Source.fromFile(fullPath)
+    val str = source.mkString
+    source.close()
+    str
+  }
+
+  def readFromResourceAndRemoveLastLinkBreak(path: String): String = {
+    readFromResource(path).stripSuffix("\n")
+  }
+
+  @throws[IOException]
+  def getFormattedJson(json: String): String = {
+    val parser = new ObjectMapper().getFactory.createParser(json)
+    val jsonNode: JsonNode = parser.readValueAsTree[JsonNode]
+    jsonNode.toString
+  }
+
+  @throws[IOException]
+  def getPrettyJson(json: String): String = {
+    val parser = new ObjectMapper().getFactory.createParser(json)
+    val jsonNode: JsonNode = parser.readValueAsTree[JsonNode]
+    jsonNode.toPrettyString
   }
 
   /**
@@ -1619,5 +1679,21 @@ object TableTestUtil {
    */
   def replaceStreamNodeId(s: String): String = {
     s.replaceAll("\"id\" : \\d+", "\"id\" : ").trim
+  }
+
+  /**
+   * ExecNode {id} is ignored, because id keeps incrementing in test class.
+   */
+  def replaceExecNodeId(s: String): String = {
+    s.replaceAll("\"id\"\\s*:\\s*\\d+", "\"id\": 0")
+      .replaceAll("\"source\"\\s*:\\s*\\d+", "\"source\": 0")
+      .replaceAll("\"target\"\\s*:\\s*\\d+", "\"target\": 0")
+  }
+
+  /**
+   * Ignore flink version value.
+   */
+  def replaceFlinkVersion(s: String): String = {
+    s.replaceAll("\"flinkVersion\":\"[\\w.-]*\"", "\"flinkVersion\":\"\"")
   }
 }

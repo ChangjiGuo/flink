@@ -21,7 +21,7 @@ package org.apache.flink.runtime.minicluster;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.blob.BlobServer;
 import org.apache.flink.runtime.dispatcher.DispatcherGateway;
-import org.apache.flink.runtime.dispatcher.MemoryArchivedExecutionGraphStore;
+import org.apache.flink.runtime.dispatcher.MemoryExecutionGraphInfoStore;
 import org.apache.flink.runtime.entrypoint.component.DispatcherResourceManagerComponent;
 import org.apache.flink.runtime.entrypoint.component.DispatcherResourceManagerComponentFactory;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
@@ -39,79 +39,82 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
-/**
- * {@link MiniCluster} extension which allows to set a custom {@link HighAvailabilityServices}.
- */
+/** {@link MiniCluster} extension which allows to set a custom {@link HighAvailabilityServices}. */
 public class TestingMiniCluster extends MiniCluster {
 
-	private final int numberDispatcherResourceManagerComponents;
+    private final int numberDispatcherResourceManagerComponents;
 
-	private final boolean localCommunication;
+    private final boolean localCommunication;
 
-	@Nullable
-	private final Supplier<HighAvailabilityServices> highAvailabilityServicesSupplier;
+    @Nullable private final Supplier<HighAvailabilityServices> highAvailabilityServicesSupplier;
 
-	public TestingMiniCluster(
-			TestingMiniClusterConfiguration miniClusterConfiguration,
-			@Nullable Supplier<HighAvailabilityServices> highAvailabilityServicesSupplier) {
-		super(miniClusterConfiguration);
-		this.numberDispatcherResourceManagerComponents = miniClusterConfiguration.getNumberDispatcherResourceManagerComponents();
-		this.highAvailabilityServicesSupplier = highAvailabilityServicesSupplier;
-		this.localCommunication = miniClusterConfiguration.isLocalCommunication();
-	}
+    public TestingMiniCluster(
+            TestingMiniClusterConfiguration miniClusterConfiguration,
+            @Nullable Supplier<HighAvailabilityServices> highAvailabilityServicesSupplier) {
+        super(miniClusterConfiguration);
+        this.numberDispatcherResourceManagerComponents =
+                miniClusterConfiguration.getNumberDispatcherResourceManagerComponents();
+        this.highAvailabilityServicesSupplier = highAvailabilityServicesSupplier;
+        this.localCommunication = miniClusterConfiguration.isLocalCommunication();
+    }
 
-	public TestingMiniCluster(TestingMiniClusterConfiguration miniClusterConfiguration) {
-		this(miniClusterConfiguration, null);
-	}
+    public TestingMiniCluster(TestingMiniClusterConfiguration miniClusterConfiguration) {
+        this(miniClusterConfiguration, null);
+    }
 
-	@Override
-	protected boolean useLocalCommunication() {
-		return localCommunication;
-	}
+    @Override
+    protected boolean useLocalCommunication() {
+        return localCommunication;
+    }
 
-	@Override
-	protected HighAvailabilityServices createHighAvailabilityServices(Configuration configuration, Executor executor) throws Exception {
-		if (highAvailabilityServicesSupplier != null) {
-			return highAvailabilityServicesSupplier.get();
-		} else {
-			return super.createHighAvailabilityServices(configuration, executor);
-		}
-	}
+    @Override
+    protected HighAvailabilityServices createHighAvailabilityServices(
+            Configuration configuration, Executor executor) throws Exception {
+        if (highAvailabilityServicesSupplier != null) {
+            return highAvailabilityServicesSupplier.get();
+        } else {
+            return super.createHighAvailabilityServices(configuration, executor);
+        }
+    }
 
-	@Override
-	protected Collection<? extends DispatcherResourceManagerComponent> createDispatcherResourceManagerComponents(
-			Configuration configuration,
-			RpcServiceFactory rpcServiceFactory,
-			HighAvailabilityServices haServices,
-			BlobServer blobServer,
-			HeartbeatServices heartbeatServices,
-			MetricRegistry metricRegistry,
-			MetricQueryServiceRetriever metricQueryServiceRetriever,
-			FatalErrorHandler fatalErrorHandler) throws Exception {
-		DispatcherResourceManagerComponentFactory dispatcherResourceManagerComponentFactory = createDispatcherResourceManagerComponentFactory();
+    @Override
+    protected Collection<? extends DispatcherResourceManagerComponent>
+            createDispatcherResourceManagerComponents(
+                    Configuration configuration,
+                    RpcServiceFactory rpcServiceFactory,
+                    HighAvailabilityServices haServices,
+                    BlobServer blobServer,
+                    HeartbeatServices heartbeatServices,
+                    MetricRegistry metricRegistry,
+                    MetricQueryServiceRetriever metricQueryServiceRetriever,
+                    FatalErrorHandler fatalErrorHandler)
+                    throws Exception {
+        DispatcherResourceManagerComponentFactory dispatcherResourceManagerComponentFactory =
+                createDispatcherResourceManagerComponentFactory();
 
-		final List<DispatcherResourceManagerComponent> result = new ArrayList<>(numberDispatcherResourceManagerComponents);
+        final List<DispatcherResourceManagerComponent> result =
+                new ArrayList<>(numberDispatcherResourceManagerComponents);
 
-		for (int i = 0; i < numberDispatcherResourceManagerComponents; i++) {
-			result.add(
-				dispatcherResourceManagerComponentFactory.create(
-					configuration,
-					getIOExecutor(),
-					rpcServiceFactory.createRpcService(),
-					haServices,
-					blobServer,
-					heartbeatServices,
-					metricRegistry,
-					new MemoryArchivedExecutionGraphStore(),
-					metricQueryServiceRetriever,
-					fatalErrorHandler));
-		}
+        for (int i = 0; i < numberDispatcherResourceManagerComponents; i++) {
+            result.add(
+                    dispatcherResourceManagerComponentFactory.create(
+                            configuration,
+                            getIOExecutor(),
+                            rpcServiceFactory.createRpcService(),
+                            haServices,
+                            blobServer,
+                            heartbeatServices,
+                            metricRegistry,
+                            new MemoryExecutionGraphInfoStore(),
+                            metricQueryServiceRetriever,
+                            fatalErrorHandler));
+        }
 
-		return result;
-	}
+        return result;
+    }
 
-	@Override
-	public CompletableFuture<DispatcherGateway> getDispatcherGatewayFuture() {
-		return super.getDispatcherGatewayFuture();
-	}
+    @Override
+    public CompletableFuture<DispatcherGateway> getDispatcherGatewayFuture() {
+        return super.getDispatcherGatewayFuture();
+    }
 }

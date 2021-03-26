@@ -20,13 +20,15 @@ package org.apache.flink.table.planner.plan.nodes.physical.batch
 
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.exec.batch.BatchExecCalc
-import org.apache.flink.table.planner.plan.nodes.exec.{ExecEdge, ExecNode}
+import org.apache.flink.table.planner.plan.nodes.exec.{InputProperty, ExecNode}
 
 import org.apache.calcite.plan._
 import org.apache.calcite.rel._
 import org.apache.calcite.rel.`type`.RelDataType
 import org.apache.calcite.rel.core.Calc
 import org.apache.calcite.rex.RexProgram
+
+import scala.collection.JavaConversions._
 
 /**
   * Batch physical RelNode for [[Calc]].
@@ -44,9 +46,17 @@ class BatchPhysicalCalc(
   }
 
   override def translateToExecNode(): ExecNode[_] = {
+    val projection = calcProgram.getProjectList.map(calcProgram.expandLocalRef)
+    val condition = if (calcProgram.getCondition != null) {
+      calcProgram.expandLocalRef(calcProgram.getCondition)
+    } else {
+      null
+    }
+
     new BatchExecCalc(
-      getProgram,
-      ExecEdge.DEFAULT,
+      projection,
+      condition,
+      InputProperty.DEFAULT,
       FlinkTypeFactory.toLogicalRowType(getRowType),
       getRelDetailedDescription)
   }

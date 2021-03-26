@@ -26,17 +26,17 @@ from pyflink.common.execution_config import ExecutionConfig
 from pyflink.common.job_client import JobClient
 from pyflink.common.job_execution_result import JobExecutionResult
 from pyflink.common.restart_strategy import RestartStrategies, RestartStrategyConfiguration
-from pyflink.common.typeinfo import PickledBytesTypeInfo, TypeInformation, _from_java_type, \
-    WrapperTypeInfo
+from pyflink.common.typeinfo import TypeInformation, Types
 from pyflink.datastream.checkpoint_config import CheckpointConfig
 from pyflink.datastream.checkpointing_mode import CheckpointingMode
 from pyflink.datastream.data_stream import DataStream
+from pyflink.datastream.execution_mode import RuntimeExecutionMode
 from pyflink.datastream.functions import SourceFunction
 from pyflink.datastream.state_backend import _from_j_state_backend, StateBackend
 from pyflink.datastream.time_characteristic import TimeCharacteristic
 from pyflink.java_gateway import get_gateway
 from pyflink.serializers import PickleSerializer
-from pyflink.util.utils import load_java_class, add_jars_to_context_class_loader
+from pyflink.util.java_utils import load_java_class, add_jars_to_context_class_loader, invoke_method
 
 __all__ = ['StreamExecutionEnvironment']
 
@@ -118,6 +118,26 @@ class StreamExecutionEnvironment(object):
         :return: Maximum degree of parallelism.
         """
         return self._j_stream_execution_environment.getMaxParallelism()
+
+    def set_runtime_mode(self, execution_mode: RuntimeExecutionMode):
+        """
+        Sets the runtime execution mode for the application
+        :class:`~pyflink.datastream.execution_mode.RuntimeExecutionMode`. This
+        is equivalent to setting the `execution.runtime-mode` in your application's
+        configuration file.
+
+        We recommend users to NOT use this method but set the `execution.runtime-mode` using
+        the command-line when submitting the application. Keeping the application code
+        configuration-free allows for more flexibility as the same application will be able to be
+        executed in any execution mode.
+
+        :param execution_mode: The desired execution mode.
+        :return: The execution environment of your application.
+
+        .. versionadded:: 1.13.0
+        """
+        return self._j_stream_execution_environment.setRuntimeMode(
+            execution_mode._to_j_execution_mode())
 
     def set_buffer_timeout(self, timeout_millis: int) -> 'StreamExecutionEnvironment':
         """
@@ -406,7 +426,7 @@ class StreamExecutionEnvironment(object):
             .getEnvironmentConfig(self._j_stream_execution_environment)
         python_files = env_config.getString(jvm.PythonOptions.PYTHON_FILES.key(), None)
         if python_files is not None:
-            python_files = jvm.PythonDependencyUtils.FILE_DELIMITER.join([python_files, file_path])
+            python_files = jvm.PythonDependencyUtils.FILE_DELIMITER.join([file_path, python_files])
         else:
             python_files = file_path
         env_config.setString(jvm.PythonOptions.PYTHON_FILES.key(), python_files)
@@ -492,7 +512,7 @@ class StreamExecutionEnvironment(object):
         .. note::
 
             Please make sure the uploaded python environment matches the platform that the cluster
-            is running on and that the python version must be 3.5 or higher.
+            is running on and that the python version must be 3.6 or higher.
 
         .. note::
 
@@ -541,11 +561,11 @@ class StreamExecutionEnvironment(object):
         .. note::
 
             Please make sure the uploaded python environment matches the platform that the cluster
-            is running on and that the python version must be 3.5 or higher.
+            is running on and that the python version must be 3.6 or higher.
 
         .. note::
 
-            The python udf worker depends on Apache Beam (version == 2.23.0).
+            The python udf worker depends on Apache Beam (version == 2.27.0).
             Please ensure that the specified environment meets the above requirements.
 
         :param python_exec: The path of python interpreter.
@@ -678,7 +698,7 @@ class StreamExecutionEnvironment(object):
         :param type_info: type of the returned stream. Optional.
         :return: the data stream constructed.
         """
-        if type_info and isinstance(type_info, WrapperTypeInfo):
+        if type_info:
             j_type_info = type_info.get_java_type_info()
         else:
             j_type_info = None
@@ -717,11 +737,7 @@ class StreamExecutionEnvironment(object):
         :return: the data stream representing the given collection.
         """
         if type_info is not None:
-            if isinstance(type_info, WrapperTypeInfo):
-                wrapper_type = _from_java_type(type_info.get_java_type_info())
-                collection = [wrapper_type.to_internal_type(element)
-                              if isinstance(wrapper_type, WrapperTypeInfo) else None
-                              for element in collection]
+            collection = [type_info.to_internal_type(element) for element in collection]
         return self._from_collection(collection, type_info)
 
     def _from_collection(self, elements: List[Any],
@@ -737,7 +753,7 @@ class StreamExecutionEnvironment(object):
             # list.
             if type_info is None:
                 j_objs = gateway.jvm.PythonBridgeUtils.readPickledBytes(temp_file.name)
-                out_put_type_info = PickledBytesTypeInfo.PICKLED_BYTE_ARRAY_TYPE_INFO()
+                out_put_type_info = Types.PICKLED_BYTE_ARRAY()  # type: TypeInformation
             else:
                 j_objs = gateway.jvm.PythonBridgeUtils.readPythonObjects(temp_file.name)
                 out_put_type_info = type_info
@@ -752,10 +768,22 @@ class StreamExecutionEnvironment(object):
                 execution_config
             )
 
-            j_data_stream_source = self._j_stream_execution_environment.createInput(
-                j_input_format,
-                out_put_type_info.get_java_type_info()
-            )
+            JInputFormatSourceFunction = gateway.jvm.org.apache.flink.streaming.api.functions.\
+                source.InputFormatSourceFunction
+            JBoundedness = gateway.jvm.org.apache.flink.api.connector.source.Boundedness
+
+            j_data_stream_source = invoke_method(
+                self._j_stream_execution_environment,
+                "org.apache.flink.streaming.api.environment.StreamExecutionEnvironment",
+                "addSource",
+                [JInputFormatSourceFunction(j_input_format, out_put_type_info.get_java_type_info()),
+                 "Collection Source",
+                 out_put_type_info.get_java_type_info(),
+                 JBoundedness.BOUNDED],
+                ["org.apache.flink.streaming.api.functions.source.SourceFunction",
+                 "java.lang.String",
+                 "org.apache.flink.api.common.typeinfo.TypeInformation",
+                 "org.apache.flink.api.connector.source.Boundedness"])
             j_data_stream_source.forceNonParallel()
             return DataStream(j_data_stream=j_data_stream_source)
         finally:

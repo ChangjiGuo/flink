@@ -18,16 +18,19 @@
 
 package org.apache.flink.table.planner.delegation
 
+import org.apache.flink.api.common.RuntimeExecutionMode
 import org.apache.flink.api.dag.Transformation
+import org.apache.flink.configuration.ExecutionOptions
 import org.apache.flink.table.api.{ExplainDetail, TableConfig, TableException, TableSchema}
 import org.apache.flink.table.catalog.{CatalogManager, FunctionCatalog, ObjectIdentifier}
 import org.apache.flink.table.delegation.Executor
 import org.apache.flink.table.operations.{CatalogSinkModifyOperation, ModifyOperation, Operation, QueryOperation}
 import org.apache.flink.table.planner.operations.PlannerQueryOperation
 import org.apache.flink.table.planner.plan.`trait`._
+import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeGraph
+import org.apache.flink.table.planner.plan.nodes.exec.processor.ExecNodeGraphProcessor
 import org.apache.flink.table.planner.plan.nodes.exec.stream.StreamExecNode
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodePlanDumper
-import org.apache.flink.table.planner.plan.nodes.exec.{ExecNode, LegacyStreamExecNode}
 import org.apache.flink.table.planner.plan.optimize.{Optimizer, StreamCommonSubGraphBasedOptimizer}
 import org.apache.flink.table.planner.plan.utils.FlinkRelOptUtil
 import org.apache.flink.table.planner.sinks.{SelectTableSinkBase, StreamSelectTableSink}
@@ -59,13 +62,12 @@ class StreamPlanner(
 
   override protected def getOptimizer: Optimizer = new StreamCommonSubGraphBasedOptimizer(this)
 
-  override protected def translateToPlan(
-      execNodes: util.List[ExecNode[_]]): util.List[Transformation[_]] = {
-    val planner = createDummyPlanner()
-    planner.overrideEnvParallelism()
+  override protected def getExecNodeGraphProcessors: Seq[ExecNodeGraphProcessor] = Seq()
 
-    execNodes.map {
-      case legacyNode: LegacyStreamExecNode[_] => legacyNode.translateToPlan(planner)
+  override protected def translateToPlan(execGraph: ExecNodeGraph): util.List[Transformation[_]] = {
+    val planner = createDummyPlanner()
+
+    execGraph.getRootNodes.map {
       case node: StreamExecNode[_] => node.translateToPlan(planner)
       case _ =>
         throw new TableException("Cannot generate DataStream due to an invalid logical plan. " +
@@ -79,6 +81,7 @@ class StreamPlanner(
 
   override def explain(operations: util.List[Operation], extraDetails: ExplainDetail*): String = {
     require(operations.nonEmpty, "operations should not be empty")
+    validateAndOverrideConfiguration()
     val sinkRelNodes = operations.map {
       case queryOperation: QueryOperation =>
         val relNode = getRelBuilder.queryOperation(queryOperation).build()
@@ -101,9 +104,9 @@ class StreamPlanner(
       case o => throw new TableException(s"Unsupported operation: ${o.getClass.getCanonicalName}")
     }
     val optimizedRelNodes = optimize(sinkRelNodes)
-    val execNodes = translateToExecNodePlan(optimizedRelNodes)
+    val execGraph = translateToExecNodeGraph(optimizedRelNodes)
 
-    val transformations = translateToPlan(execNodes)
+    val transformations = translateToPlan(execGraph)
     val streamGraph = ExecutorUtils.generateStreamGraph(getExecEnv, transformations)
 
     val sb = new StringBuilder
@@ -132,7 +135,7 @@ class StreamPlanner(
 
     sb.append("== Optimized Execution Plan ==")
     sb.append(System.lineSeparator)
-    sb.append(ExecNodePlanDumper.dagToString(execNodes))
+    sb.append(ExecNodePlanDumper.dagToString(execGraph))
 
     if (extraDetails.contains(ExplainDetail.JSON_EXECUTION_PLAN)) {
       sb.append(System.lineSeparator)
@@ -148,5 +151,39 @@ class StreamPlanner(
     val dummyExecEnv = new DummyStreamExecutionEnvironment(getExecEnv)
     val executor = new StreamExecutor(dummyExecEnv)
     new StreamPlanner(executor, config, functionCatalog, catalogManager)
+  }
+
+  override def explainJsonPlan(jsonPlan: String, extraDetails: ExplainDetail*): String = {
+    validateAndOverrideConfiguration()
+    val execGraph = ExecNodeGraph.createExecNodeGraph(jsonPlan, createSerdeContext)
+    val transformations = translateToPlan(execGraph)
+    val streamGraph = ExecutorUtils.generateStreamGraph(getExecEnv, transformations)
+
+    val sb = new StringBuilder
+    sb.append("== Optimized Execution Plan ==")
+    sb.append(System.lineSeparator)
+    sb.append(ExecNodePlanDumper.dagToString(execGraph))
+
+    if (extraDetails.contains(ExplainDetail.JSON_EXECUTION_PLAN)) {
+      sb.append(System.lineSeparator)
+      sb.append("== Physical Execution Plan ==")
+      sb.append(System.lineSeparator)
+      sb.append(streamGraph.getStreamingPlanAsJSON)
+    }
+
+    sb.toString()
+  }
+
+  override def validateAndOverrideConfiguration(): Unit = {
+    super.validateAndOverrideConfiguration()
+    if (!config.getConfiguration.get(ExecutionOptions.RUNTIME_MODE)
+      .equals(RuntimeExecutionMode.STREAMING)) {
+      throw new IllegalArgumentException(
+        "Mismatch between configured runtime mode and actual runtime mode. " +
+          "Currently, the 'execution.runtime-mode' can only be set when instantiating the " +
+          "table environment. Subsequent changes are not supported. " +
+          "Please instantiate a new TableEnvironment if necessary."
+      )
+    }
   }
 }

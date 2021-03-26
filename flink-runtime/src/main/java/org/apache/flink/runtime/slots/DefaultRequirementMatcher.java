@@ -18,28 +18,42 @@
 package org.apache.flink.runtime.slots;
 
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
+import org.apache.flink.runtime.util.ResourceCounter;
 
-import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
 /**
- * Default implementation of {@link RequirementMatcher}. This matcher finds the first requirement that a) is not unfulfilled and B) matches the resource profile.
+ * Default implementation of {@link RequirementMatcher}. This matcher finds the first requirement
+ * that a) is not unfulfilled and B) matches the resource profile.
  */
 public class DefaultRequirementMatcher implements RequirementMatcher {
-	@Override
-	public Optional<ResourceProfile> match(ResourceProfile resourceProfile, Collection<Map.Entry<ResourceProfile, Integer>> totalRequirements, Function<ResourceProfile, Integer> numAssignedResourcesLookup) {
-		for (Map.Entry<ResourceProfile, Integer> requirementCandidate : totalRequirements) {
-			ResourceProfile requirementProfile = requirementCandidate.getKey();
+    @Override
+    public Optional<ResourceProfile> match(
+            ResourceProfile resourceProfile,
+            ResourceCounter totalRequirements,
+            Function<ResourceProfile, Integer> numAssignedResourcesLookup) {
+        // Short-cut for fine-grained resource management. If there is already exactly equal
+        // requirement, we can directly match with it.
+        if (totalRequirements.getResourceCount(resourceProfile)
+                > numAssignedResourcesLookup.apply(resourceProfile)) {
+            return Optional.of(resourceProfile);
+        }
 
-			// beware the order when matching resources to requirements, because ResourceProfile.UNKNOWN (which only
-			// occurs as a requirement) does not match any resource!
-			if (resourceProfile.isMatching(requirementProfile) && requirementCandidate.getValue() > numAssignedResourcesLookup.apply(requirementProfile)) {
-				return Optional.of(requirementProfile);
-			}
-		}
-		return Optional.empty();
+        for (Map.Entry<ResourceProfile, Integer> requirementCandidate :
+                totalRequirements.getResourcesWithCount()) {
+            ResourceProfile requirementProfile = requirementCandidate.getKey();
 
-	}
+            // beware the order when matching resources to requirements, because
+            // ResourceProfile.UNKNOWN (which only
+            // occurs as a requirement) does not match any resource!
+            if (resourceProfile.isMatching(requirementProfile)
+                    && requirementCandidate.getValue()
+                            > numAssignedResourcesLookup.apply(requirementProfile)) {
+                return Optional.of(requirementProfile);
+            }
+        }
+        return Optional.empty();
+    }
 }

@@ -87,6 +87,7 @@ under the License.
 		<module>flink-netty-shuffle-memory-control-test</module>
 		<module>flink-python-test</module>
 		<module>flink-end-to-end-tests-hbase</module>
+		<module>flink-glue-schema-registry-test</module>
 	</modules>
 
 	<dependencyManagement>
@@ -261,8 +262,11 @@ under the License.
 						</goals>
 						<configuration>
 							<includes>
-								<include>**/*ITCase.*</include>
+								<include>**/*.*</include>
 							</includes>
+							<excludes>
+								<exclude>${test.unit.pattern}</exclude>
+							</excludes>
 							<!-- Disable all tests by default.
                                 Uses a separate property to make it configurable from the command-line. -->
 							<groups>${includeE2E}</groups>

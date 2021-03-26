@@ -40,16 +40,18 @@ import org.apache.flink.table.api.bridge.scala.BatchTableEnvironment
 import org.apache.flink.table.api.TableConfig
 import org.apache.flink.table.api.internal.TableEnvImpl
 import org.apache.flink.table.api.bridge.scala.internal.BatchTableEnvironmentImpl
-import org.apache.flink.table.calcite.{CalciteParser, FlinkRelBuilder}
+import org.apache.flink.table.calcite.FlinkRelBuilder
 import org.apache.flink.table.codegen.{Compiler, FunctionCodeGenerator, GeneratedFunction}
 import org.apache.flink.table.expressions.{Expression, ExpressionParser}
 import org.apache.flink.table.functions.ScalarFunction
+import org.apache.flink.table.parse.CalciteParser
 import org.apache.flink.table.plan.nodes.dataset.{DataSetCalc, DataSetScan}
 import org.apache.flink.table.plan.rules.FlinkRuleSets
+import org.apache.flink.table.utils.LegacyRowResource
 import org.apache.flink.types.Row
 
 import org.junit.Assert._
-import org.junit.{After, Before}
+import org.junit.{After, Before, Rule}
 import org.mockito.Mockito._
 
 import scala.collection.mutable
@@ -58,6 +60,9 @@ import scala.collection.mutable
   * Base test class for expression tests.
   */
 abstract class ExpressionTestBase {
+
+  @Rule
+  def usesLegacyRows: LegacyRowResource = LegacyRowResource.INSTANCE
 
   private val testExprs = mutable.ArrayBuffer[(String, RexNode, String)]()
 
